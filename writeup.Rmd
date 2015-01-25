@@ -1,0 +1,97 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+##Introduction
+This is a submission for the course "Practical Machine Learning" offered by the Johns Hopkins Bloomberg School of Public Health and Coursera in the context of the Data Science Specialization. For this project, we are given data collected from on the belt, forearm, arm, and dumbell of 6 participants while performing weight lifting exercises. Subjects were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More info on the experiment can be found [here](http://groupware.les.inf.puc-rio.br/har).
+
+The goal of the project is to build a model that classifies each observation (each barbell lift) in one of the 5  cathegories, as indicated by the "classe" variable in the dataset. Class A corresponds to the specified execution of the exercise, while the other classes (B-E) correspond to common mistakes.
+
+##Getting, cleaning and exploring data
+
+```{r echo = F}
+setwd("~/MachLearn/W3/Project/MachLearnPr")
+```
+
+```{r echo = T, eval = F}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "./data/pml-training.csv", method = "curl")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "./data/pml-testing.csv", method = "curl")
+```
+```{r}
+training<-read.csv("./data/pml-training.csv", header = T, stringsAsFactors = F, na.strings = c("", "#DIV/0!"))
+testing<-read.csv("./data/pml-testing.csv", header = T, stringsAsFactors = F)
+training$classe<-as.factor(training$classe)
+dim(training)
+```
+
+We see that our training data is composed of `r dim(training)[1]` observations and `r dim(training)[2]` variables. Testing dataset consists in 20 cases with the same variables as the training dataset, and are to be used only for evaluation purposes. First thing we do is split training data in train/test for model performance evaluation purposes.
+
+```{r, message = F}
+library(caret)
+set.seed(52147)
+inValidation<-createDataPartition(y=training$classe, p = 0.4, list = F)
+validation<-training[inValidation, ]
+training<-training[-inValidation, ]
+```
+
+First thing to assert is that there are lots of variables with missing values. In some columns they represent the 100% of the data, and in others is as high as 98%. Due to the unknowns on the reason why it is so (there is no codebook available to explain variables) we prefer to remove them.
+
+
+```{r, warning = F}
+training<-training[, -(1:7)] #index, name of subject, timestamps...
+#force conversion to numeric of all the predictors
+training[,1:(dim(training)[2]-1)]<-sapply(training[,1:(dim(training)[2]-1)], function(x) as.numeric(x))
+#Keep only the variables with no NA values
+training<-training[, colSums(is.na(training))== 0]
+dim(training)
+```
+
+Our dataset has been reduced to `r dim(training)[2]-1` predictors (plus the outcome "classe" variable), which should be enough to predict the outcome. However, if we were to fit, say, a random forest, or a boost model, or some other computationally intensive algorithm, the training process could last for hours. We prefered to explore the dataset to select predictors. Exploration of the data was mainly done via paired scatterplots. Due to the size of the dataset, these scatterplots were subdivided in groups of five variables at a time. We were looking for patterns in the data that allowed to infer separation by class. We also tried a principal component analysis (PCA), but the results were unclear. Here is a sample of the kind of plots we used.
+
+
+```{r}
+pairs(training[, 1:5], col = training$classe)
+```
+
+After the exploration process, we decided to keep 12 predictors.
+
+```{r}
+predictors1<-c("pitch_arm", 
+               "yaw_arm", 
+               "total_accel_arm", 
+               "roll_dumbbell", 
+               "pitch_dumbbell", 
+               "yaw_dumbbell", "
+               accel_dumbbell_x", 
+               "accel_dumbbell_y", 
+               "magnet_dumbbell_x", 
+               "magnet_dumbbell_z", 
+               "roll_forearm", 
+               "pitch_forearm")
+train1<-subset(training, select =names(training) %in% predictors1)
+train1$classe<-training$classe
+```
+
+##Fitting a model
+Then we fit several models. We use caret's train to tune the different models, with cross validation as a control method (with the default parameters: 10 folds using 75% of the data, with no repeats). We fit some simple models (naive bayes, classification trees) and some complex ones (LDA with bagging, boosting with trees, even a Support Vector Machine), but the one that wins the match is Random Forest.
+
+
+```{r, message = F, cache = T}
+set.seed(255)
+randomFF<-train(classe ~., method = "rf", trControl = trainControl(method ="cv"), data = train1)
+pred6<-predict(randomFF, newdata = validation)
+
+```
+
+##Out-of-sample estimation and analysis
+
+To obtain an out-of-sample estimation, we predict on our validation set. Almost 95% of the predictions are correct. A visualization of the confusion matrix gives more light to the strengths and 
+
+
+```{r}
+mean(pred6 == validation$classe) #0.948
+print(confusionMatrix(pred6, validation$classe))
+```
+
+Balanced accuracy is up the 95% for each of the 5 classes. We can see, however, that although specificity (the ratio of correct negatives) is around 98-99% for each of the classes, our model tends to perform a little worse when asked to identify the true positives in each of the B-E (error) classes, and sensitivity (ratio of correct positives) for these classes spans over 91-95%. Further exploration could be conducted to improve the performance of the model in these cases.
